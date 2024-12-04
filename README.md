@@ -6,7 +6,7 @@ This repository is a write up of how to deploy a Machine Learning Model using Cl
 
 **Clone this repository**
 ```
-`git clone https://github.com/Syahrulalhabib/everin-deploy.git`
+git clone https://github.com/Syahrulalhabib/everin-deploy.git
 ```
 **Activate the cloud shell**
 
