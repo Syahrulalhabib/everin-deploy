@@ -113,30 +113,30 @@ def predict_food(image_path):
 def get_food_recommendations(food_features):
     """Get food recommendations using KNN model"""
     try:
-        # Convert food_features to numpy array and reshape if needed
+        # Pastikan food_features dikirim dalam format yang benar (list dengan 3 fitur)
         food_features = np.array(food_features).reshape(1, -1)
         
-        # Get nearest neighbors
+        # Mendapatkan nearest neighbors
         distances, indices = knn_model.kneighbors(food_features)
         
         recommendations = []
         for i, idx in enumerate(indices[0]):
-            food = dataset[int(idx)]
+            food = dataset[idx]  # Mengakses makanan berdasarkan index KNN
             recommendations.append({
-                "nama": food["Nama Makanan/Minuman"],
+                "nama": food["Nama Makanan/Minuman"],  # Nama makanan/minuman
                 "nutrition": {
-                    "kalori": float(food["Kalori (kcal)"]),  # Convert to float
-                    "karbohidrat": float(food["Karbohidrat (g)"]),
-                    "protein": float(food["Protein (g)"]),
-                    "lemak": float(food["Lemak (g)"])
+                    "kalori": food["Kalori (kcal)"],  # Kalori
+                    "karbohidrat": food["Karbohidrat (g)"],  # Karbohidrat
+                    "protein": food["Protein (g)"],  # Protein
+                    "lemak": food["Lemak (g)"]  # Lemak
                 },
-                "similarity_score": float(1 / (1 + distances[0][i]))
+                "similarity_score": float(1 / (1 + distances[0][i]))  # Similarity score
             })
         return recommendations
     except Exception as e:
         logger.error(f"Error in get_food_recommendations: {str(e)}")
-        raise
-
+        raise  # Raise the error again to be handled in the calling function
+    
 def hitung_bmr_tdee(berat_badan, tinggi_badan, umur, jenis_kelamin, tingkat_aktivitas):
     """Calculate BMR and TDEE"""
     if jenis_kelamin.lower() == 'pria':
@@ -251,9 +251,8 @@ def recommend():
         return jsonify({'error': 'Models not loaded properly'}), 503
         
     try:
+        # Mengambil data dari request
         data = request.json
-        # Add debug logging
-        logger.info(f"Received data: {data}")
         
         if not data:
             logger.error("No JSON data received")
@@ -266,11 +265,7 @@ def recommend():
             logger.error(f"Missing fields: {missing_fields}")
             return jsonify({'error': f'Missing required fields: {missing_fields}'}), 400
         
-        # Add debug logging for values
-        logger.info(f"Extracted values - karbohidrat: {data.get('karbohidrat')}, "
-                   f"protein: {data.get('protein')}, lemak: {data.get('lemak')}")
-        
-        # Validate numeric values and convert to float
+        # Validasi dan konversi nilai ke tipe data float
         try:
             food_features = [
                 float(data['karbohidrat']),
@@ -281,17 +276,19 @@ def recommend():
             logger.error(f"Invalid numeric values: {str(e)}")
             return jsonify({'error': 'All nutritional values must be numbers'}), 400
             
-        # Validate non-negative values
+        # Validasi nilai tidak boleh negatif
         if any(x < 0 for x in food_features):
             logger.error("Negative nutritional values provided")
             return jsonify({'error': 'Nutritional values cannot be negative'}), 400
         
+        # Mendapatkan rekomendasi makanan
         recommendations = get_food_recommendations(food_features)
         
         if not recommendations:
             logger.warning("No recommendations found")
             return jsonify({'message': 'No similar foods found', 'recommendations': []}), 200
         
+        # Menyusun response dengan nilai input dan rekomendasi
         return jsonify({
             'input_values': {
                 'karbohidrat': food_features[0],
@@ -300,40 +297,41 @@ def recommend():
             },
             'recommendations': recommendations
         })
-        
+    
     except Exception as e:
         logger.error(f"Error in recommend endpoint: {str(e)}")
-        logger.error(f"Request data: {request.get_data()}")  # Add raw request data logging
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal server error occurred'}), 500
 
 @app.route('/recommend-by-name', methods=['POST'])
 def recommend_by_name():
     """Endpoint for food recommendations based on food name"""
     if knn_model is None or dataset is None:
-        logger.error("Models not loaded properly")
         return jsonify({'error': 'Models not loaded properly'}), 503
         
     try:
         data = request.json
-        # Add debug logging
-        logger.info(f"Received data: {data}")
-        
         if 'food_name' not in data:
-            logger.error("Missing food_name field")
             return jsonify({'error': 'Missing food_name field'}), 400
             
-        # Find the food in dataset
-        food_name = data['food_name'].lower().strip()
-        logger.info(f"Searching for food: {food_name}")
+        # Normalize and handle spaces by stripping extra spaces in the input
+        food_name_input = data['food_name'].lower().strip()  # Strip any leading/trailing spaces and convert to lowercase
         
+        # Find the food in the dataset by comparing names
         food_data = None
-        for i, food in enumerate(dataset):
-            if food["Nama Makanan/Minuman"].lower().strip() == food_name:
+        
+        for food in dataset:
+            # Normalize the dataset food names to handle multiple spaces and case insensitivity
+            dataset_food_name = food["Nama Makanan/Minuman"].lower().strip()
+            
+            # Replace multiple spaces within the food name with a single space (to handle input like "Nasi  Goreng")
+            dataset_food_name = ' '.join(dataset_food_name.split())
+            
+            # Compare the normalized input with the normalized dataset food name
+            if dataset_food_name == food_name_input:
                 food_data = food
                 break
                 
         if food_data is None:
-            logger.error(f"Food not found: {food_name}")
             return jsonify({'error': 'Food not found in database'}), 404
             
         # Get food features and convert to float
@@ -343,17 +341,17 @@ def recommend_by_name():
             float(food_data["Lemak (g)"])
         ]
         
-        logger.info(f"Found food features: {food_features}")
+        # Get recommendations using the KNN model
         recommendations = get_food_recommendations(food_features)
         
         return jsonify({
             'input_food': {
                 'nama': food_data["Nama Makanan/Minuman"],
                 'nutrition': {
-                    'kalori': float(food_data["Kalori (kcal)"]),
-                    'karbohidrat': float(food_data["Karbohidrat (g)"]),
-                    'protein': float(food_data["Protein (g)"]),
-                    'lemak': float(food_data["Lemak (g)"])
+                    'kalori': food_data["Kalori (kcal)"],
+                    'karbohidrat': food_data["Karbohidrat (g)"],
+                    'protein': food_data["Protein (g)"],
+                    'lemak': food_data["Lemak (g)"]
                 }
             },
             'recommendations': recommendations
@@ -361,9 +359,8 @@ def recommend_by_name():
         
     except Exception as e:
         logger.error(f"Error in recommend-by-name endpoint: {str(e)}")
-        logger.error(f"Request data: {request.get_data()}")  # Add raw request data logging
         return jsonify({'error': str(e)}), 500
-    
+
 if __name__ == '__main__':
     load_models()  # Load models before starting the app
     app.run(port=8080, debug=True)
