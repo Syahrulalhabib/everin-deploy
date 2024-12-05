@@ -5,7 +5,7 @@
 This repository is a write up of how to deploy a Machine Learning Model using Cloud Run
 
 **Activate the cloud shell**
-**and Clone this repository**
+**and clone this repository**
 ```
 git clone https://github.com/Syahrulalhabib/everin-deploy.git
 ```
