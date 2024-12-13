@@ -21,24 +21,28 @@ gcloud run deploy everin-deploy --port 8080 --source . --region asia-southeast2 
 **API Endpoint**
 ========================================
 **1. Image Recognition**
+
 POST 
 ```
 https://<service-name>-<random-hash>-<region>.run.app/predict
 ```
 
 **2. Nutrition Calculator**
+
 POST
 ```
 https://<service-name>-<random-hash>-<region>.run.app/calculate
 ```
 
 **3. Food Recommendation**
+
 POST
 ```
 https://<service-name>-<random-hash>-<region>.run.app/recommend
 ```
 
 **4. Recommendation by Name**
+
 POST
 ```
 https://<service-name>-<random-hash>-<region>.run.app/recommend-by-name
@@ -46,6 +50,7 @@ https://<service-name>-<random-hash>-<region>.run.app/recommend-by-name
 
 
 **5. Submit Data**
+
 POST
 ```
 https://<service-name>-<random-hash>-<region>.run.app/submit
@@ -53,6 +58,7 @@ https://<service-name>-<random-hash>-<region>.run.app/submit
 
 
 **6. Status**
+
 GET 
 ```
 https://<service-name>-<random-hash>-<region>.run.app/status/<email>
