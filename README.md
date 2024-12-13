@@ -44,3 +44,16 @@ POST
 https://<service-name>-<random-hash>-<region>.run.app/recommend-by-name
 ```
 
+
+**5. Submit Data**
+POST
+```
+https://<service-name>-<random-hash>-<region>.run.app/submit
+```
+
+
+**6. Status**
+GET 
+```
+https://<service-name>-<random-hash>-<region>.run.app/status/<email>
+```
