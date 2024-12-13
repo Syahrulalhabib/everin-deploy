@@ -8,6 +8,17 @@ import os
 from sklearn.neighbors import NearestNeighbors
 import pandas as pd
 import logging
+from google.cloud import firestore
+import firebase_admin
+from firebase_admin import credentials, firestore
+import datetime
+
+# Inisialisasi Firebase Admin SDK
+cred = credentials.Certificate('ServiceAccountKey.json')  # Ganti dengan path ke file kunci Anda
+firebase_admin.initialize_app(cred)
+
+# Buat instance Firestore client
+firestore_client = firestore.client()
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -76,16 +87,6 @@ try:
 except Exception as e:
     logger.error(f"Failed to load models: {str(e)}")
     pass
-
-@app.route('/status', methods=['GET'])
-def check_status():
-    """Check if models are loaded properly"""
-    return jsonify({
-        'cnn_model_loaded': cnn_model is not None,
-        'knn_model_loaded': knn_model is not None,
-        'dataset_loaded': dataset is not None
-    })
-
 def predict_food(image_path):
     """Predict food from image and get nutrition info"""
     try:
@@ -168,9 +169,79 @@ def hitung_kebutuhan_makronutrien(tdee):
 
     return gram_karbohidrat, gram_protein, gram_lemak
 
+def submit_prediction_to_firestore(data):
+    """Submit prediction data to Firestore"""
+    try:
+        # Cek apakah semua field yang dibutuhkan ada
+        required_fields = ['food_name', 'confidence', 'nutrition', 'recommendations']
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            return {
+                'status': 'error',
+                'message': f"Missing required fields: {missing_fields}"
+            }, 400  # Mengembalikan status 400 jika ada field yang hilang
+        
+        # Struktur data untuk Firestore
+        submission_data = {
+            'food_name': data['food_name'],
+            'confidence': data['confidence'],
+            'nutrition': data['nutrition'],
+            'recommendations': data['recommendations'],
+            'timestamp': firestore.SERVER_TIMESTAMP  # Gunakan timestamp dari Firestore
+        }
+        
+        # Menyimpan data ke Firestore
+        doc_ref = firestore_client.collection('users').add(submission_data)   
+
+        # Mengembalikan response dengan doc_id yang dihasilkan
+        return {
+            'status': 'success',
+            'doc_id': doc_ref.id,  # ID dokumen Firestore yang dihasilkan
+            'submitted_data': submission_data
+        }, 200  # Kode status 200 jika berhasil
+        
+    except Exception as e:
+        # Menangani error jika terjadi kegagalan saat submit
+        logger.error(f"Error submitting to Firestore: {str(e)}")
+        
+        return {
+            'status': 'error',
+            'message': f"Error submitting to Firestore: {str(e)}"
+        }, 500  # Kode status 500 jika ada kesalahan server
+
+@app.route('/status/<email>', methods=['GET'])
+def get_status_by_email(email):
+    """Menampilkan total kalori, karbohidrat, protein, dan lemak berdasarkan email pengguna"""
+    try:
+        # Referensi ke dokumen total nutrition berdasarkan email
+        totals_ref = firestore_client.collection('users').document(email).collection('totals').document('nutrition_totals')
+        totals_doc = totals_ref.get()
+
+        # Periksa apakah dokumen ada
+        if totals_doc.exists:
+            total_nutrition = totals_doc.to_dict()
+            return jsonify({
+                'status': 'success',
+                'email': email,
+                'kalori': total_nutrition.get('kalori', 0),
+                'karbohidrat': total_nutrition.get('karbohidrat', 0),
+                'protein': total_nutrition.get('protein', 0),
+                'lemak': total_nutrition.get('lemak', 0)
+            }), 200
+        else:
+            # Jika tidak ada data untuk email tersebut
+            return jsonify({
+                'status': 'error',
+                'message': f'No nutrition data found for email: {email}'
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Error fetching status for {email}: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/predict', methods=['POST'])
 def predict():
-    """Endpoint for food prediction from image"""
+
     if cnn_model is None or dataset is None:
         return jsonify({'error': 'Models not loaded properly'}), 503
         
@@ -179,18 +250,15 @@ def predict():
         
     try:
         file = request.files['file']
-        # Create temp directory if it doesn't exist
         os.makedirs('temp', exist_ok=True)
         
         file_path = os.path.join('temp', file.filename)
         file.save(file_path)
         
         food_name, nutrition, confidence = predict_food(file_path)
-        
-        # Clean up temporary file
         os.remove(file_path)
         
-        # Get food features for recommendation
+
         food_features = [
             nutrition["karbohidrat"],
             nutrition["protein"], 
@@ -304,7 +372,7 @@ def recommend():
 
 @app.route('/recommend-by-name', methods=['POST'])
 def recommend_by_name():
-    """Endpoint for food recommendations based on food name"""
+
     if knn_model is None or dataset is None:
         return jsonify({'error': 'Models not loaded properly'}), 503
         
@@ -313,20 +381,11 @@ def recommend_by_name():
         if 'food_name' not in data:
             return jsonify({'error': 'Missing food_name field'}), 400
             
-        # Normalize and handle spaces by stripping extra spaces in the input
-        food_name_input = data['food_name'].lower().strip()  # Strip any leading/trailing spaces and convert to lowercase
-        
-        # Find the food in the dataset by comparing names
+        food_name_input = data['food_name'].lower().strip()
         food_data = None
         
         for food in dataset:
-            # Normalize the dataset food names to handle multiple spaces and case insensitivity
-            dataset_food_name = food["Nama Makanan/Minuman"].lower().strip()
-            
-            # Replace multiple spaces within the food name with a single space (to handle input like "Nasi  Goreng")
-            dataset_food_name = ' '.join(dataset_food_name.split())
-            
-            # Compare the normalized input with the normalized dataset food name
+            dataset_food_name = ' '.join(food["Nama Makanan/Minuman"].lower().strip().split())
             if dataset_food_name == food_name_input:
                 food_data = food
                 break
@@ -334,17 +393,17 @@ def recommend_by_name():
         if food_data is None:
             return jsonify({'error': 'Food not found in database'}), 404
             
-        # Get food features and convert to float
+
         food_features = [
             float(food_data["Karbohidrat (g)"]),
             float(food_data["Protein (g)"]),
             float(food_data["Lemak (g)"])
         ]
         
-        # Get recommendations using the KNN model
+
         recommendations = get_food_recommendations(food_features)
         
-        return jsonify({
+        response_data = {
             'input_food': {
                 'nama': food_data["Nama Makanan/Minuman"],
                 'nutrition': {
@@ -355,10 +414,65 @@ def recommend_by_name():
                 }
             },
             'recommendations': recommendations
-        })
+        }
+        
+        return jsonify(response_data)
         
     except Exception as e:
         logger.error(f"Error in recommend-by-name endpoint: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/submit', methods=['POST'])
+def submit_submission():
+    """Menambahkan data submission ke Firestore dan memperbarui total nilai berdasarkan email"""
+    try:
+        # Ambil data dari body request
+        data = request.get_json()
+        email = data.get('email')  # Gunakan email sebagai user_id
+        new_nutrition = data.get('nutrition', {})
+
+        # Validasi input
+        if not email or not new_nutrition:
+            return jsonify({'error': 'email dan nutrition diperlukan'}), 400
+
+        # Referensi ke dokumen user berdasarkan email
+        user_ref = firestore_client.collection('users').document(email)
+        submission_ref = user_ref.collection('submissions')
+
+        # Tambahkan data baru ke sub-koleksi 'submissions'
+        submission_ref.add({'nutrition': new_nutrition})
+
+        # Dapatkan atau inisialisasi total nutrition
+        totals_ref = user_ref.collection('totals').document('nutrition_totals')
+        totals_doc = totals_ref.get()
+
+        if totals_doc.exists:
+            # Jika total nutrition sudah ada, tambahkan nilai baru
+            total_nutrition = totals_doc.to_dict()
+            total_nutrition['kalori'] += new_nutrition.get('kalori', 0)
+            total_nutrition['karbohidrat'] += new_nutrition.get('karbohidrat', 0)
+            total_nutrition['protein'] += new_nutrition.get('protein', 0)
+            total_nutrition['lemak'] += new_nutrition.get('lemak', 0)
+        else:
+            # Jika belum ada, inisialisasi total nutrition
+            total_nutrition = {
+                'kalori': new_nutrition.get('kalori', 0),
+                'karbohidrat': new_nutrition.get('karbohidrat', 0),
+                'protein': new_nutrition.get('protein', 0),
+                'lemak': new_nutrition.get('lemak', 0)
+            }
+
+        # Simpan kembali total nutrition
+        totals_ref.set(total_nutrition)
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Data berhasil ditambahkan dan total diperbarui',
+            'totals': total_nutrition
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error in /submit: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
